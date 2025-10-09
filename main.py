@@ -195,7 +195,7 @@ class JrysPlugin(Star):
         """
         message_str = event.message_str.strip()
         if self.jrys_keyword_enabled:
-            if '运势' in message_str or '今日运势' in message_str or 'jrys' in message_str.lower():
+            if message_str == 'jrys' or message_str == '今日运势' or message_str == '运势':
                 async for result in self.jrys(event):
                     yield result
 
