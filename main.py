@@ -106,7 +106,7 @@ class JrysPlugin(Star):
         os.makedirs(self.background_dir, exist_ok=True)
         os.makedirs(self.font_dir, exist_ok=True)
 
-     # 处理器1：指令处理器
+    # 处理器1：指令处理器
     @filter.command("jrys", alias=["今日运势", "运势"])
     async def jrys_command_handler(self, event: AstrMessageEvent):
         """处理 /jrys, /今日运势, /运势 等指令"""
@@ -114,24 +114,24 @@ class JrysPlugin(Star):
 
         # 关键步骤1: 给事件打上“已处理”标记
         # 利用 event 对象是可变的特性，给它动态添加一个属性
-        setattr(event, '_jrys_processed', True)
+        setattr(event, "_jrys_processed", True)
 
         # 调用核心业务逻辑
         async for result in self.jrys(event):
             yield result
 
-     # 处理器2：关键词处理器
+    # 处理器2：关键词处理器
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def jrys_keyword_handler(self, event: AstrMessageEvent):
         """处理 jrys, 今日运势, 运势 等关键词"""
 
         # 关键步骤2: 检查事件是否已被指令处理器处理过
-        if getattr(event, '_jrys_processed', False):
+        if getattr(event, "_jrys_processed", False):
             return  # 如果已被处理，立即退出
 
         # 如果没被处理过，再进行后续的关键词匹配逻辑
         message_str = event.message_str.strip()
-        keywords = {'jrys', '今日运势', '运势'}
+        keywords = {"jrys", "今日运势", "运势"}
 
         if self.jrys_keyword_enabled and message_str in keywords:
             logger.info("关键词处理器被触发")
@@ -140,89 +140,87 @@ class JrysPlugin(Star):
                 yield result
 
     async def jrys(self, event: AstrMessageEvent):
-            """
-            输入/jrys,"/今日运势", "/运势"指令后，生成今日运势海报
-            """
+        """
+        输入/jrys,"/今日运势", "/运势"指令后，生成今日运势海报
+        """
 
-            user_id = event.get_sender_id()
-            user_name = event.get_sender_name()
+        user_id = event.get_sender_id()
+        user_name = event.get_sender_name()
 
-            self.jrys_data = await self._load_jrys_data()  # 确保数据已加载
-            if not self.jrys_data:
-                logger.error("运势数据未加载或为空")
-                yield event.plain_result("运势数据加载失败，请稍后再试～")
+        self.jrys_data = await self._load_jrys_data()  # 确保数据已加载
+        if not self.jrys_data:
+            logger.error("运势数据未加载或为空")
+            yield event.plain_result("运势数据加载失败，请稍后再试～")
+            return
+
+        logger.info(f"正在为用户 {user_name}({user_id}) 生成今日运势")
+
+        try:
+
+            results = await asyncio.gather(
+                self.get_avatar_img(user_id),
+                self.get_background_image(),
+                return_exceptions=True,  # 捕获异常
+            )
+
+            avatar_path, background_path = results
+
+            if isinstance(avatar_path, Exception):
+                logger.error(f"获取头像时出错: {avatar_path}")
+                yield event.plain_result("获取头像失败，请稍后再试～")
                 return
 
-            logger.info(f"正在为用户 {user_name}({user_id}) 生成今日运势")
-
-            try:
-
-                results = await asyncio.gather(
-                    self.get_avatar_img(user_id),
-                    self.get_background_image(),
-                    return_exceptions=True,  # 捕获异常
-                )
-
-                avatar_path, background_path = results
-
-                if isinstance(avatar_path, Exception):
-                    logger.error(f"获取头像时出错: {avatar_path}")
-                    yield event.plain_result("获取头像失败，请稍后再试～")
-                    return
-
-                if isinstance(background_path, Exception):
-                    logger.error(f"获取背景图片时出错: {background_path}")
-                    yield event.plain_result("获取背景图片失败，请稍后再试～")
-                    return
-
-            except Exception as e:
-                logger.error(f"获取头像或背景图片时出错: {e}")
-                yield event.plain_result("获取头像或背景图片失败，请稍后再试～")
+            if isinstance(background_path, Exception):
+                logger.error(f"获取背景图片时出错: {background_path}")
+                yield event.plain_result("获取背景图片失败，请稍后再试～")
                 return
 
-            temp_file_path = None  # 用于存储临时文件路径
+        except Exception as e:
+            logger.error(f"获取头像或背景图片时出错: {e}")
+            yield event.plain_result("获取头像或背景图片失败，请稍后再试～")
+            return
 
-            try:
+        temp_file_path = None  # 用于存储临时文件路径
 
-                logger.info(f"正在为用户 {user_name}({user_id}) 生成今日运势图片")
-                temp_file_path = await asyncio.to_thread(
-                    self._generate_image_sync, avatar_path, background_path
-                )
+        try:
 
-                if temp_file_path is None:
-                    logger.error("生成今日运势图片失败")
-                    yield event.plain_result("生成图片失败，请稍后再试～")
-                    return
+            logger.info(f"正在为用户 {user_name}({user_id}) 生成今日运势图片")
+            temp_file_path = await asyncio.to_thread(
+                self._generate_image_sync, user_id, avatar_path, background_path
+            )
 
-                yield event.image_result(temp_file_path)
-                logger.info(f"成功为用户 {user_name}({user_id}) 生成今日运势图片")
-
-            except Exception as e:
-                logger.error(f"生成运势图片过程中出错: {e}")
+            if temp_file_path is None:
+                logger.error("生成今日运势图片失败")
                 yield event.plain_result("生成图片失败，请稍后再试～")
+                return
 
-            finally:
-                # 用完后删除临时文件
-                
-                if temp_file_path and os.path.exists(temp_file_path):
-                    try:
-                        await aiofiles.os.remove(temp_file_path)
-                        logger.info(f"成功删除临时文件")
+            yield event.image_result(temp_file_path)
+            logger.info(f"成功为用户 {user_name}({user_id}) 生成今日运势图片")
 
-                    except OSError as e:
-                        logger.warning(f"删除临时文件 {temp_file_path} 失败: {e}")
+        except Exception as e:
+            logger.error(f"生成运势图片过程中出错: {e}")
+            yield event.plain_result("生成图片失败，请稍后再试～")
 
-                    except FileNotFoundError:
-                        logger.warning(f"临时文件 {temp_file_path} 已经被删除或不存在")
-                        pass
+        finally:
+            # 用完后删除临时文件
 
-                    except Exception as e:
-                        logger.warning(f"删除临时文件 {temp_file_path} 失败: {e}")
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    await aiofiles.os.remove(temp_file_path)
+                    logger.info(f"成功删除临时文件")
 
-        
+                except OSError as e:
+                    logger.warning(f"删除临时文件 {temp_file_path} 失败: {e}")
+
+                except FileNotFoundError:
+                    logger.warning(f"临时文件 {temp_file_path} 已经被删除或不存在")
+                    pass
+
+                except Exception as e:
+                    logger.warning(f"删除临时文件 {temp_file_path} 失败: {e}")
 
     def _generate_image_sync(
-        self, avatar_path: str, background_path: str
+        self, user_id: str, avatar_path: str, background_path: str
     ) -> Optional[str]:
         """
             同步函数：执行所有CPU密集的图像处理任务。
@@ -245,6 +243,15 @@ class JrysPlugin(Star):
         warning_text_y = self.warning_text_y
 
         try:
+            # 获取当前日期字符串
+            today_str = datetime.now().strftime("%Y-%m-%d")
+
+            # 结合用户ID和日期生成一个确定性的种子
+            seed = f"{user_id}-{today_str}"
+
+            # 设置随机种子，以确保该用户今日运势固定
+            random.seed(seed)
+
             available_keys_list = list(self.jrys_data.keys())
 
             key_1 = random.choice(available_keys_list)
@@ -366,6 +373,10 @@ class JrysPlugin(Star):
         except Exception as e:
             logger.error(f"获取运势数据失败: {e}")
             return None
+
+        finally:
+            # 无论成功或失败，最后都重置随机种子，以免影响程序其他部分的随机性
+            random.seed(None)
 
     async def _load_jrys_data(self) -> dict:
         """
