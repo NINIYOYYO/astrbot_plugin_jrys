@@ -467,7 +467,11 @@ class JrysPlugin(Star):
                 # 下载图片
 
                 try:
-                    async with self._session.get(image_url) as response:
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+                    }
+
+                    async with self._session.get(image_url, headers=headers) as response:
                         response.raise_for_status()  # 检查请求是否成功
                         content = await response.read()  # 异步读取响应内容
 
