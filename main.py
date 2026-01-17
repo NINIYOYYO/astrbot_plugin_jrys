@@ -552,6 +552,26 @@ class JrysPlugin(Star):
         async for result in self.jrys(event):
             yield result
 
+    @filter.command("jrys_last")
+    async def jrys_last_command_handler(self, event: AstrMessageEvent):
+        """处理 /jrys_last 指令，发送上一次生成的原图"""
+        user_id = event.get_sender_id()
+        jrys_data = await self._load_jrys_data()
+        
+        user_last_images = jrys_data.get("_user_last_images", {})
+        if user_id not in user_last_images:
+            yield event.plain_result("你还没有生成过今日运势哦，先发送 jrys 生成一张吧！")
+            return
+
+        last_info = user_last_images[user_id]
+        path = last_info.get("path")
+
+        if not path or not os.path.exists(path):
+            yield event.plain_result("找不到上一次生成的原图了，可能已被清理，请重新生成～")
+            return
+
+        yield event.image_result(path)
+
     # 处理器2：关键词处理器
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def jrys_keyword_handler(self, event: AstrMessageEvent, *args, **kwargs):
@@ -643,6 +663,30 @@ class JrysPlugin(Star):
 
             yield event.image_result(temp_file_path)
             logger.info(f"成功为用户 {user_name}({user_id}) 生成今日运势图片")
+
+            # 保存最后一次使用的背景图信息到 jrys_data
+            if "_user_last_images" not in self.jrys_data:
+                self.jrys_data["_user_last_images"] = {}
+            
+            user_last_images = self.jrys_data["_user_last_images"]
+            if user_id in user_last_images:
+                old_info = user_last_images[user_id]
+                old_path = old_info.get("path")
+                # 如果旧图是临时图且与新图不同，则删除旧图
+                if old_info.get("should_cleanup") and old_path and old_path != background_path and os.path.exists(old_path):
+                    try:
+                        await aiofiles.os.remove(old_path)
+                    except:
+                        pass
+            
+            user_last_images[user_id] = {
+                "path": background_path,
+                "should_cleanup": background_should_cleanup
+            }
+            await self._save_jrys_data() # 保存更新后的 jrys_data
+            
+            # 标记当前背景图已由 jrys_data 管理，不要在 finally 中清理
+            background_should_cleanup = False 
 
         except Exception as e:
             logger.error(f"生成运势图片过程中出错: {e}")
@@ -872,6 +916,16 @@ class JrysPlugin(Star):
         except json.JSONDecodeError:
             logger.error(f"文件 {jrys_path} 不是有效的 JSON 格式")
             return {}
+
+    async def _save_jrys_data(self):
+        """保存 jrys 数据到 jrys.json"""
+        jrys_path = os.path.join(self.data_dir, "jrys.json")
+        try:
+            async with aiofiles.open(jrys_path, "w", encoding="utf-8") as f:
+                content = await asyncio.to_thread(json.dumps, self.jrys_data, ensure_ascii=False, indent=4)
+                await f.write(content)
+        except Exception as e:
+            logger.error(f"保存运势数据失败: {e}")
 
     async def get_background_image(self) -> Optional[Tuple[str, bool]]:
         """
