@@ -127,13 +127,13 @@
         "hint": "设置平时的运势抽取概率权重。",
         "items": {
             "good": {
-                "description": "大吉/中吉 (>=84分) 权重",
+                "description": "大吉 (>=84分) 权重",
                 "type": "int",
                 "default": 40,
                 "slider": {"min": 0, "max": 100, "step": 1}
             },
             "normal": {
-                "description": "平运 (56~70分) 权重",
+                "description": "中吉 (56~70分) 权重",
                 "type": "int",
                 "default": 40,
                 "slider": {"min": 0, "max": 100, "step": 1}
