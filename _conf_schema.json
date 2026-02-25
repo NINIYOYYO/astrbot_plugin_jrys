@@ -102,15 +102,74 @@
         "type": "bool",
         "hint": "当未启用预缓存背景图时，插件每次运行按需下载的背景图在生成完成后将被删除，默认开启。如需将按需下载也持久化到本地缓存，请关闭该开关。",
         "default": true
-    }
-    
-
-
-    
-
-
-
-
-
+    },
+    "holiday_rates_enabled":{
+        "description": "节假日运势高爆率",
+        "type": "bool",
+        "hint": "启用后，插件会根据中国大陆的节假日调整当天的运势，例如在春节期间会增加财运和人缘运势。默认开启。",
+        "default": true
+    },
+    "fixed_daily_fortune":{
+        "description": "每日固定运势",
+        "type": "bool",
+        "hint": "开启后，用户每天抽取的运势是固定的（哪怕重复发指令）。关闭后，每次触发都会随机生成全新运势。",
+        "default": true
+    },
+    "holidays": {
+        "description": "节假日日期列表",
+        "type": "list",
+        "hint": "配置需要触发高爆率的日期 (MM-DD 格式)。",
+        "default": ["01-01", "02-14", "05-01", "10-01", "12-25"]
+    },
+    "normal_rates": {
+        "description": "日常运势爆率权重",
+        "type": "object",
+        "hint": "设置平时的运势抽取概率权重。",
+        "items": {
+            "good": {
+                "description": "大吉/中吉 (>=84分) 权重",
+                "type": "int",
+                "default": 40,
+                "slider": {"min": 0, "max": 100, "step": 1}
+            },
+            "normal": {
+                "description": "平运 (56~70分) 权重",
+                "type": "int",
+                "default": 40,
+                "slider": {"min": 0, "max": 100, "step": 1}
+            },
+            "bad": {
+                "description": "凶运 (<42分) 权重",
+                "type": "int",
+                "default": 20,
+                "slider": {"min": 0, "max": 100, "step": 1}
+            }
+        }
+    },
+    "holiday_rates": {
+        "description": "节假日运势爆率权重",
+        "type": "object",
+        "hint": "设置节假日时的运势抽取概率权重。",
+        "items": {
+            "good": {
+                "description": "大吉 (>=84分) 权重",
+                "type": "int",
+                "default": 85,
+                "slider": {"min": 0, "max": 100, "step": 1}
+            },
+            "normal": {
+                "description": "中吉 (56~70分) 权重",
+                "type": "int",
+                "default": 15,
+                "slider": {"min": 0, "max": 100, "step": 1}
+            },
+            "bad": {
+                "description": "凶 (<42分) 权重",
+                "type": "int",
+                "default": 0,
+                "slider": {"min": 0, "max": 100, "step": 1}
+            }
+        }
+    }    
 
 }

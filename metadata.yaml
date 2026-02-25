@@ -3,7 +3,10 @@ desc: 今日运势查询，会生成一张图片，包含今日运势、宜忌�
 help: 
   【基础指令】
   - /jrys ：查询今日运势(/今日运势 /运势 等关键词也可以触发)
-version: v1.0.3
+version: v1.0.4
 author: ominus
 repo: https://github.com/NINIYOYYO/astrbot_plugin_jrys
+
+support_platforms:
+  - aiocqhttp
 
