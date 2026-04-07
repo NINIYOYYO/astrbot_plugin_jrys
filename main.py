@@ -6,7 +6,7 @@ import os
 import asyncio
 import aiofiles
 import aiofiles.os
-from .resources import ResourceManager 
+from .resources import ResourceManager
 from .painter import FortunePainter
 
 
@@ -17,13 +17,19 @@ class JrysPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
 
-        self.config = config    
-        self.resources = ResourceManager(self.config)
+        self.config = config
+        self.resources = ResourceManager(
+            self.config,
+            plugin_name=getattr(self, "name", None),
+        )
         self.painter = FortunePainter(self.config)
 
         # 是否启用关键词触发功能
         self.jrys_keyword_enabled = self.config.get("jrys_keyword_enabled", True)
 
+    async def initialize(self):
+        """插件加载后初始化资源管理器。"""
+        await self.resources.initialize()
 
     # 处理器1：指令处理器
     @filter.command("jrys", alias=["今日运势", "运势"])
@@ -46,14 +52,18 @@ class JrysPlugin(Star):
         self.jrys_data = await self.resources._load_jrys_data()
         user_last_images = self.jrys_data.get("_user_last_images", {})
         if user_id not in user_last_images:
-            yield event.plain_result("你还没有生成过今日运势哦，先发送 jrys 生成一张吧！")
+            yield event.plain_result(
+                "你还没有生成过今日运势哦，先发送 jrys 生成一张吧！"
+            )
             return
 
         last_info = user_last_images[user_id]
         path = last_info.get("path")
 
         if not path or not os.path.exists(path):
-            yield event.plain_result("找不到上一次生成的原图了，可能已被清理，请重新生成～")
+            yield event.plain_result(
+                "找不到上一次生成的原图了，可能已被清理，请重新生成～"
+            )
             return
 
         yield event.image_result(path)
@@ -87,15 +97,12 @@ class JrysPlugin(Star):
 
         self.jrys_data = await self.resources._load_jrys_data()
 
-
-
         logger.info(f"正在为用户 {user_name}({user_id}) 生成今日运势")
 
         background_path = None
         background_should_cleanup = False
 
         try:
-
             results = await asyncio.gather(
                 self.resources.get_avatar_img(user_id),
                 self.resources.get_background_image(),
@@ -119,7 +126,11 @@ class JrysPlugin(Star):
             if isinstance(avatar_path, Exception):
                 logger.error(f"获取头像时出错: {avatar_path}")
                 yield event.plain_result("获取头像失败，请稍后再试～")
-                if background_should_cleanup and background_path and os.path.exists(background_path):
+                if (
+                    background_should_cleanup
+                    and background_path
+                    and os.path.exists(background_path)
+                ):
                     try:
                         await aiofiles.os.remove(background_path)
                     except Exception:
@@ -134,10 +145,13 @@ class JrysPlugin(Star):
         temp_file_path = None  # 用于存储临时文件路径
 
         try:
-
             logger.info(f"正在为用户 {user_name}({user_id}) 生成今日运势图片")
             temp_file_path = await asyncio.to_thread(
-                self.painter.generate_image_sync, user_id, avatar_path, background_path, self.jrys_data
+                self.painter.generate_image_sync,
+                user_id,
+                avatar_path,
+                background_path,
+                self.jrys_data,
             )
 
             if temp_file_path is None:
@@ -151,26 +165,31 @@ class JrysPlugin(Star):
             # 保存最后一次使用的背景图信息到 jrys_data
             if "_user_last_images" not in self.jrys_data:
                 self.jrys_data["_user_last_images"] = {}
-            
+
             user_last_images = self.jrys_data["_user_last_images"]
             if user_id in user_last_images:
                 old_info = user_last_images[user_id]
                 old_path = old_info.get("path")
                 # 如果旧图是临时图且与新图不同，则删除旧图
-                if old_info.get("should_cleanup") and old_path and old_path != background_path and os.path.exists(old_path):
+                if (
+                    old_info.get("should_cleanup")
+                    and old_path
+                    and old_path != background_path
+                    and os.path.exists(old_path)
+                ):
                     try:
                         await aiofiles.os.remove(old_path)
-                    except:
+                    except Exception:
                         pass
-            
+
             user_last_images[user_id] = {
                 "path": background_path,
-                "should_cleanup": background_should_cleanup
+                "should_cleanup": background_should_cleanup,
             }
-            await self.resources._save_jrys_data() # 保存更新后的 jrys_data
-            
+            await self.resources._save_jrys_data()  # 保存更新后的 jrys_data
+
             # 标记当前背景图已由 jrys_data 管理，不要在 finally 中清理
-            background_should_cleanup = False 
+            background_should_cleanup = False
 
         except Exception as e:
             logger.error(f"生成运势图片过程中出错: {e}")
@@ -182,7 +201,7 @@ class JrysPlugin(Star):
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     await aiofiles.os.remove(temp_file_path)
-                    logger.info(f"成功删除临时文件")
+                    logger.info("成功删除临时文件")
 
                 except OSError as e:
                     logger.warning(f"删除临时文件 {temp_file_path} 失败: {e}")
@@ -220,5 +239,3 @@ class JrysPlugin(Star):
             logger.info("HTTP会话已关闭")
 
         logger.info("今日运势插件已终止")
-
-

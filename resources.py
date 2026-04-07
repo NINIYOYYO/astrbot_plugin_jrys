@@ -18,25 +18,27 @@ import os
 
 ONE_DAY_IN_SECONDS = 86400
 
+
 class ResourceManager:
     """
     资源管理器，负责用户头像和背景图片的获取、缓存和管理
     """
-    def __init__(self, plugin_config) -> None:
+
+    def __init__(self, plugin_config, plugin_name: Optional[str] = None) -> None:
         self._http_timeout = aiohttp.ClientTimeout(total=5)  # 设置请求超时时间为5秒
         self._connection_limit = aiohttp.TCPConnector(limit=10)  # 限制并发连接数为10
         self._session = aiohttp.ClientSession(
             timeout=self._http_timeout, connector=self._connection_limit
         )
         self.plugin_config = plugin_config
+        self.name = plugin_name or "astrbot_plugin_jrysprpr"
 
         self.avatar_cache_expiration = self.plugin_config.get(
             "avatar_cache_expiration", ONE_DAY_IN_SECONDS
         )  # 默认一天过期
 
-        
         # 初始化jrys数据
-       
+
         self.is_data_loaded = False
 
         self._storage_initialized = False
@@ -45,13 +47,11 @@ class ResourceManager:
         self._background_tmp_dir: Optional[Path] = None
         self._precache_task: Optional[asyncio.Task] = None
 
-
         self.data_dir = os.path.dirname(os.path.abspath(__file__))
         self.avatar_dir = os.path.join(self.data_dir, "avatars")
         self.background_dir = os.path.join(self.data_dir, "backgroundFolder")
         self.font_dir = os.path.join(self.data_dir, "font")
-        
-        
+
         self._http_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
         }
@@ -85,7 +85,6 @@ class ResourceManager:
 
             # 从选中的 txt 文件中随机选择一行
             async with aiofiles.open(background_file_path, "r", encoding="utf-8") as f:
-
                 # 读取文件内容
                 background_urls = [line.strip() async for line in f if line.strip()]
 
@@ -124,7 +123,9 @@ class ResourceManager:
                         image_path = self._background_tmp_path_for_url(image_url)
                         should_cleanup = True
 
-                    ok = await self._download_to_path(image_url, image_path, label="背景图")
+                    ok = await self._download_to_path(
+                        image_url, image_path, label="背景图"
+                    )
                     if ok:
                         logger.info(f"下载图片成功: {image_url}")
                         return str(image_path), should_cleanup
@@ -177,8 +178,6 @@ class ResourceManager:
             logger.error(f"获取用户头像失败: {e}")
             return None
 
-
-
     async def initialize(self):
         """插件加载/重载后执行（适合做缓存预热等异步任务）。"""
         self._ensure_storage_dirs()
@@ -186,7 +185,9 @@ class ResourceManager:
         if self.plugin_config.get("pre_cache_background_images", False):
             self._start_background_precache()
 
-    def _migrate_legacy_cache_dir(self, legacy_dir: Path, target_dir: Path, label: str) -> None:
+    def _migrate_legacy_cache_dir(
+        self, legacy_dir: Path, target_dir: Path, label: str
+    ) -> None:
         """将旧版本缓存目录迁移到标准插件数据目录。"""
         try:
             if not legacy_dir.exists() or not legacy_dir.is_dir():
@@ -262,9 +263,13 @@ class ResourceManager:
         try:
             from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-            plugin_name = getattr(self, "name", None) or "unknown"
+            plugin_name = (
+                self.name or getattr(self, "name", None) or "astrbot_plugin_jrysprpr"
+            )
             data_root = get_astrbot_data_path()
-            data_root_path = data_root if isinstance(data_root, Path) else Path(str(data_root))
+            data_root_path = (
+                data_root if isinstance(data_root, Path) else Path(str(data_root))
+            )
             plugin_data_dir = data_root_path / "plugin_data" / plugin_name
             plugin_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -289,7 +294,9 @@ class ResourceManager:
                 plugin_data_dir / "avatars",
             ]
             for legacy_dir in legacy_avatar_dirs:
-                self._migrate_legacy_cache_dir(legacy_dir, target_avatar_dir, label="头像")
+                self._migrate_legacy_cache_dir(
+                    legacy_dir, target_avatar_dir, label="头像"
+                )
 
             legacy_background_dirs = [
                 Path(self.background_dir) / "images",  # 旧 fallback 结构
@@ -334,7 +341,9 @@ class ResourceManager:
                 Path(self.data_dir) / "avatars",
             ]
             for legacy_dir in legacy_avatar_dirs:
-                self._migrate_legacy_cache_dir(legacy_dir, target_avatar_dir, label="头像")
+                self._migrate_legacy_cache_dir(
+                    legacy_dir, target_avatar_dir, label="头像"
+                )
 
             legacy_background_dirs = [
                 Path(self.background_dir) / "images",
@@ -395,7 +404,9 @@ class ResourceManager:
             tmp_path = dest.parent / f"{dest.name}.{uuid4().hex}.tmp"
 
             try:
-                async with self._session.get(url, headers=self._http_headers) as response:
+                async with self._session.get(
+                    url, headers=self._http_headers
+                ) as response:
                     status = response.status
                     reason = (response.reason or "").strip()
 
@@ -491,7 +502,9 @@ class ResourceManager:
         for background_file in background_files:
             background_file_path = os.path.join(self.background_dir, background_file)
             try:
-                async with aiofiles.open(background_file_path, "r", encoding="utf-8") as f:
+                async with aiofiles.open(
+                    background_file_path, "r", encoding="utf-8"
+                ) as f:
                     async for line in f:
                         url = line.strip()
                         if not url:
@@ -595,7 +608,6 @@ class ResourceManager:
             f"预缓存背景图完成: total={total}, cached={already_cached}, downloaded={downloaded}, failed={failed}"
         )
 
-           
     async def _load_jrys_data(self) -> dict:
         """
         初始化 jrys.json 文件
@@ -639,10 +651,9 @@ class ResourceManager:
         jrys_path = os.path.join(self.data_dir, "jrys.json")
         try:
             async with aiofiles.open(jrys_path, "w", encoding="utf-8") as f:
-                content = await asyncio.to_thread(json.dumps, self.jrys_data, ensure_ascii=False, indent=4)
+                content = await asyncio.to_thread(
+                    json.dumps, self.jrys_data, ensure_ascii=False, indent=4
+                )
                 await f.write(content)
         except Exception as e:
             logger.error(f"保存运势数据失败: {e}")
-
-
-
