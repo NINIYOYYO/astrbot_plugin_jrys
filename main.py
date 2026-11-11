@@ -45,6 +45,9 @@ class JrysPlugin(Star):
         async for result in self.jrys(event):
             yield result
 
+        # 指令已处理完毕，终止事件传播
+        event.stop_event()
+
     @filter.command("jrys_last")
     async def jrys_last_command_handler(self, event: AstrMessageEvent):
         """处理 /jrys_last 指令，发送上一次生成的原图"""
@@ -68,6 +71,9 @@ class JrysPlugin(Star):
 
         yield event.image_result(path)
 
+        # 指令已处理完毕，终止事件传播
+        event.stop_event()
+
     # 处理器2：关键词处理器
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def jrys_keyword_handler(self, event: AstrMessageEvent, *args, **kwargs):
@@ -86,6 +92,9 @@ class JrysPlugin(Star):
             # 调用核心业务逻辑
             async for result in self.jrys(event):
                 yield result
+
+            # 指令已处理完毕，终止事件传播
+            event.stop_event()
 
     async def jrys(self, event: AstrMessageEvent):
         """
