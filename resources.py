@@ -1,13 +1,12 @@
 from typing import Optional, List, Tuple
 from astrbot.api import logger
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
 import random
 import aiofiles
-import aiofiles.os
 import aiohttp
 import errno
 import shutil
@@ -19,18 +18,28 @@ import os
 ONE_DAY_IN_SECONDS = 86400
 
 
+AVATAR_SIZE = 640
+LAST_IMAGE_LIMIT = 200
+# 官方 QQ 平台的发送者 ID 是 OpenID，头像地址需要 AppID，不能沿用 QQ 号接口
+QQ_OFFICIAL_PLATFORMS = frozenset(
+    {"qq_official", "qq_official_webhook", "qq_official_v2", "qq_official_v2_webhook"}
+)
+QQ_NUMBER_PLATFORMS = frozenset({"aiocqhttp"})
+
+
 class ResourceManager:
     """
     资源管理器，负责用户头像和背景图片的获取、缓存和管理
     """
 
-    def __init__(self, plugin_config, plugin_name: Optional[str] = None) -> None:
+    def __init__(self, plugin_config, context=None, plugin_name: Optional[str] = None) -> None:
         self._http_timeout = aiohttp.ClientTimeout(total=5)  # 设置请求超时时间为5秒
         self._connection_limit = aiohttp.TCPConnector(limit=10)  # 限制并发连接数为10
         self._session = aiohttp.ClientSession(
             timeout=self._http_timeout, connector=self._connection_limit
         )
         self.plugin_config = plugin_config
+        self.context = context  # Star 上下文，用于读取当前平台实例的 AppID
         self.name = plugin_name or "astrbot_plugin_jrysprpr"
 
         self.avatar_cache_expiration = self.plugin_config.get(
@@ -45,6 +54,7 @@ class ResourceManager:
         self._plugin_data_dir: Optional[Path] = None
         self._background_cache_dir: Optional[Path] = None
         self._background_tmp_dir: Optional[Path] = None
+        self._last_image_dir: Optional[Path] = None
         self._precache_task: Optional[asyncio.Task] = None
 
         self.data_dir = os.path.dirname(os.path.abspath(__file__))
@@ -137,46 +147,127 @@ class ResourceManager:
             logger.error(f"获取背景图片时出错: {e}")
             return None
 
-    async def get_avatar_img(self, user_id: str) -> Optional[str]:
-        """
-        获取用户头像
-          1. 获取用户头像2. 获取用户头像的 URL3. 下载头像4. 返回头像的路径
-        Args:
-            user_id (str): 用户 ID
+    def _platform_id(self, event) -> str:
+        platform_id = event.get_platform_id()
+        return platform_id if isinstance(platform_id, str) and platform_id else "unknown"
 
-        Returns:
-            str: 头像的路径
-        """
+    def _official_appid(self, event) -> Optional[str]:
+        """只读取当前平台实例的 AppID，用于拼接头像地址。"""
+        if self.context is None:
+            return None
+        platform = self.context.get_platform_inst(event.get_platform_id())
+        config = getattr(platform, "config", None)
+        appid = config.get("appid") if isinstance(config, dict) else None
+        return appid if isinstance(appid, str) and appid else None
+
+    async def _avatar_url(self, event, user_id: str) -> Optional[str]:
+        """按平台类型解析头像地址，无法解析时返回 None。"""
+        platform_name = event.get_platform_name()
+        if platform_name in QQ_NUMBER_PLATFORMS:
+            return f"http://q.qlogo.cn/g?b=qq&nk={quote(user_id)}&s={AVATAR_SIZE}"
+        if platform_name not in QQ_OFFICIAL_PLATFORMS:
+            return None
+
+        call_action = getattr(getattr(event, "bot", None), "call_action", None)
+        if callable(call_action):
+            try:
+                result = await call_action(
+                    "_qq_get_avatar", user_id=user_id, size=AVATAR_SIZE
+                )
+                url = result.get("url") if isinstance(result, dict) else None
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    return url
+            except Exception as e:
+                logger.debug(f"适配器未能解析头像地址，改用 AppID 拼接: {e}")
+
+        appid = self._official_appid(event)
+        if appid:
+            return (
+                f"https://q.qlogo.cn/qqapp/{quote(appid)}/{quote(user_id)}/{AVATAR_SIZE}"
+            )
+        return None
+
+    @staticmethod
+    def _file_mtime(path: Path) -> Optional[float]:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return None
+
+    def avatar_cache_path(self, platform_id: str, user_id: str) -> Path:
+        digest = sha256(f"{platform_id}:{user_id}".encode("utf-8")).hexdigest()
+        return Path(self.avatar_dir) / f"{digest}.jpg"
+
+    async def get_avatar_img(self, event, user_id: str) -> Optional[str]:
+        """解析并缓存用户头像，平台不支持或下载失败时返回 None。"""
         try:
             self._ensure_storage_dirs()
-            avatar_path = os.path.join(self.avatar_dir, f"{user_id}.jpg")
-            # 检查头像是否存在
-            if await aiofiles.os.path.exists(avatar_path):
+            url = await self._avatar_url(event, user_id)
+            if not url:
+                logger.info(
+                    f"当前平台无法解析头像，本次不绘制头像: {event.get_platform_name()}"
+                )
+                return None
 
-                def _file_stat(path):
-                    try:
-                        st = os.stat(path)
-                        return st.st_mtime
-                    except FileNotFoundError:
-                        return None
+            avatar_path = self.avatar_cache_path(self._platform_id(event), user_id)
+            file_mtime = await asyncio.to_thread(self._file_mtime, avatar_path)
+            if (
+                file_mtime is not None
+                and datetime.now().timestamp() - file_mtime
+                < self.avatar_cache_expiration
+            ):  # 默认如果头像文件小于一天，则不下载
+                return str(avatar_path)
 
-                file_mtime = await asyncio.to_thread(_file_stat, avatar_path)
-                file_age = datetime.now().timestamp() - file_mtime
-                if (
-                    file_age < self.avatar_cache_expiration
-                ):  # 默认如果头像文件小于一天，则不下载
-                    return avatar_path
-
-            url = f"http://q.qlogo.cn/g?b=qq&nk={user_id}&s=640"
-
-            ok = await self._download_to_path(url, Path(avatar_path), label="头像")
+            ok = await self._download_to_path(url, avatar_path, label="头像")
             if ok:
-                return avatar_path
+                return str(avatar_path)
+            logger.warning(f"头像下载失败，本次不绘制头像: {url}")
             return None
 
         except Exception as e:
             logger.error(f"获取用户头像失败: {e}")
             return None
+
+    def last_image_path(self, platform_id: str, user_id: str) -> Path:
+        self._ensure_storage_dirs()
+        assert self._last_image_dir is not None
+        digest = sha256(f"{platform_id}:{user_id}".encode("utf-8")).hexdigest()
+        return self._last_image_dir / f"{digest}.jpg"
+
+    async def store_last_image(
+        self, platform_id: str, user_id: str, source_path: str
+    ) -> Optional[str]:
+        """保存本次生成的原图，供 /jrys_last 取回。"""
+        if not source_path or not os.path.exists(source_path):
+            return None
+        try:
+            self._ensure_storage_dirs()
+            target = self.last_image_path(platform_id, user_id)
+            temp_path = target.with_name(f"{target.name}.{uuid4().hex}.tmp")
+            try:
+                await asyncio.to_thread(shutil.copyfile, source_path, temp_path)
+                await asyncio.to_thread(os.replace, temp_path, target)
+            except Exception:
+                temp_path.unlink(missing_ok=True)
+                raise
+            await asyncio.to_thread(self._prune_last_images)
+            return str(target)
+        except Exception as e:
+            logger.warning(f"保存运势原图失败: {e}")
+            return None
+
+    def _prune_last_images(self) -> None:
+        """原图缓存最多保留 LAST_IMAGE_LIMIT 个。"""
+        try:
+            assert self._last_image_dir is not None
+            files = sorted(
+                (path for path in self._last_image_dir.iterdir() if path.is_file()),
+                key=lambda path: path.stat().st_mtime,
+            )
+            for path in files[: max(len(files) - LAST_IMAGE_LIMIT, 0)]:
+                path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"清理运势原图缓存失败: {e}")
 
     async def initialize(self):
         """插件加载/重载后执行（适合做缓存预热等异步任务）。"""
@@ -287,6 +378,8 @@ class ResourceManager:
             target_avatar_dir = cache_dir / "avatars"
             self.avatar_dir = str(target_avatar_dir)
             os.makedirs(self.avatar_dir, exist_ok=True)
+            self._last_image_dir = cache_dir / "last_images"
+            self._last_image_dir.mkdir(parents=True, exist_ok=True)
 
             # 迁移旧版本缓存目录（插件目录 / 旧 plugin_data 结构 / 旧 fallback 结构）
             legacy_avatar_dirs = [
@@ -336,6 +429,8 @@ class ResourceManager:
             target_avatar_dir = cache_dir / "avatars"
             self.avatar_dir = str(target_avatar_dir)
             os.makedirs(self.avatar_dir, exist_ok=True)
+            self._last_image_dir = cache_dir / "last_images"
+            self._last_image_dir.mkdir(parents=True, exist_ok=True)
 
             legacy_avatar_dirs = [
                 Path(self.data_dir) / "avatars",
@@ -646,14 +741,3 @@ class ResourceManager:
             logger.error(f"文件 {jrys_path} 不是有效的 JSON 格式")
             return {}
 
-    async def _save_jrys_data(self):
-        """保存 jrys 数据到 jrys.json"""
-        jrys_path = os.path.join(self.data_dir, "jrys.json")
-        try:
-            async with aiofiles.open(jrys_path, "w", encoding="utf-8") as f:
-                content = await asyncio.to_thread(
-                    json.dumps, self.jrys_data, ensure_ascii=False, indent=4
-                )
-                await f.write(content)
-        except Exception as e:
-            logger.error(f"保存运势数据失败: {e}")
