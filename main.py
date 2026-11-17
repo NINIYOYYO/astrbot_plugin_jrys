@@ -20,6 +20,7 @@ class JrysPlugin(Star):
         self.config = config
         self.resources = ResourceManager(
             self.config,
+            context=self.context,
             plugin_name=getattr(self, "name", None),
         )
         self.painter = FortunePainter(self.config)
@@ -52,24 +53,15 @@ class JrysPlugin(Star):
     async def jrys_last_command_handler(self, event: AstrMessageEvent):
         """处理 /jrys_last 指令，发送上一次生成的原图"""
         user_id = event.get_sender_id()
-        self.jrys_data = await self.resources._load_jrys_data()
-        user_last_images = self.jrys_data.get("_user_last_images", {})
-        if user_id not in user_last_images:
+        path = self.resources.last_image_path(event.get_platform_id(), user_id)
+
+        if not path.exists():
             yield event.plain_result(
                 "你还没有生成过今日运势哦，先发送 jrys 生成一张吧！"
             )
             return
 
-        last_info = user_last_images[user_id]
-        path = last_info.get("path")
-
-        if not path or not os.path.exists(path):
-            yield event.plain_result(
-                "找不到上一次生成的原图了，可能已被清理，请重新生成～"
-            )
-            return
-
-        yield event.image_result(path)
+        yield event.image_result(str(path))
 
         # 指令已处理完毕，终止事件传播
         event.stop_event()
@@ -113,7 +105,7 @@ class JrysPlugin(Star):
 
         try:
             results = await asyncio.gather(
-                self.resources.get_avatar_img(user_id),
+                self.resources.get_avatar_img(event, user_id),
                 self.resources.get_background_image(),
                 return_exceptions=True,  # 捕获异常
             )
@@ -133,18 +125,8 @@ class JrysPlugin(Star):
             background_path, background_should_cleanup = background_result
 
             if isinstance(avatar_path, Exception):
-                logger.error(f"获取头像时出错: {avatar_path}")
-                yield event.plain_result("获取头像失败，请稍后再试～")
-                if (
-                    background_should_cleanup
-                    and background_path
-                    and os.path.exists(background_path)
-                ):
-                    try:
-                        await aiofiles.os.remove(background_path)
-                    except Exception:
-                        pass
-                return
+                logger.warning(f"获取头像时出错，本次不绘制头像: {avatar_path}")
+                avatar_path = None
 
         except Exception as e:
             logger.error(f"获取头像或背景图片时出错: {e}")
@@ -171,34 +153,11 @@ class JrysPlugin(Star):
             yield event.image_result(temp_file_path)
             logger.info(f"成功为用户 {user_name}({user_id}) 生成今日运势图片")
 
-            # 保存最后一次使用的背景图信息到 jrys_data
-            if "_user_last_images" not in self.jrys_data:
-                self.jrys_data["_user_last_images"] = {}
-
-            user_last_images = self.jrys_data["_user_last_images"]
-            if user_id in user_last_images:
-                old_info = user_last_images[user_id]
-                old_path = old_info.get("path")
-                # 如果旧图是临时图且与新图不同，则删除旧图
-                if (
-                    old_info.get("should_cleanup")
-                    and old_path
-                    and old_path != background_path
-                    and os.path.exists(old_path)
-                ):
-                    try:
-                        await aiofiles.os.remove(old_path)
-                    except Exception:
-                        pass
-
-            user_last_images[user_id] = {
-                "path": background_path,
-                "should_cleanup": background_should_cleanup,
-            }
-            await self.resources._save_jrys_data()  # 保存更新后的 jrys_data
-
-            # 标记当前背景图已由 jrys_data 管理，不要在 finally 中清理
-            background_should_cleanup = False
+            stored_path = await self.resources.store_last_image(
+                event.get_platform_id(), user_id, temp_file_path
+            )
+            if stored_path is None:
+                logger.warning("本次运势原图未能保存，/jrys_last 将无法取回")
 
         except Exception as e:
             logger.error(f"生成运势图片过程中出错: {e}")

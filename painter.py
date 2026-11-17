@@ -47,11 +47,14 @@ class FortunePainter:
         )  # 默认图片高度
 
         avatar_position_list = self.plugin_config.get(
-            "avatar_position", list(AVATAR_POSITION)
+            "avatar_position",
+            self.plugin_config.get("avater_position", list(AVATAR_POSITION)),
         )
         self.avatar_position = tuple(avatar_position_list)  # 默认头像位置
 
-        avatar_size_list = self.plugin_config.get("avatar_size", list(AVATAR_SIZE))
+        avatar_size_list = self.plugin_config.get(
+            "avatar_size", self.plugin_config.get("avater_size", list(AVATAR_SIZE))
+        )
         self.avatar_size = tuple(avatar_size_list)
 
         self.date_y = self.plugin_config.get("date_y_position", DATE_Y)
@@ -614,18 +617,23 @@ class FortunePainter:
         ]
         return random.choices(light_colors, k=4)  # 随机选4个颜色进行渐变
 
-    def draw_avatar_img(self, avatar_path: str, img: Image.Image) -> Image.Image:
+    def draw_avatar_img(
+        self, avatar_path: Optional[str], img: Image.Image
+    ) -> Image.Image:
         """
         在图片上绘制用户头像
         1. 获取用户头像
         2. 将头像裁剪为圆形
         3. 将头像绘制到图片上
         Args:
-            avatar_path (str): 头像的路径
+            avatar_path (str): 头像的路径，为空时跳过头像
             img (Image): 要绘制的图片
         Returns:
             Image: 绘制了头像的图片
         """
+        if not avatar_path:
+            return img
+
         try:
             avatar = Image.open(avatar_path).convert("RGBA")
             avatar = avatar.resize(self.avatar_size, Image.LANCZOS)

@@ -23,7 +23,7 @@
         "hint": "设置头像缓存的过期时间，单位为秒。默认值为 86400 秒（即 24 小时）。",
         "default": 86400
     },
-    "avater_size":{
+    "avatar_size":{
         "description": "头像尺寸",
         "type": "list",
         "item": {
@@ -33,7 +33,7 @@
         "hint": "设置头像的尺寸大小，默认为[150, 150]",
         "default": [150, 150]
     },
-    "avater_position":{
+    "avatar_position":{
         "description": "头像位置",
         "type": "list",
         "item": {
